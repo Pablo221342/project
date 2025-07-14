@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gestión y Ventas</title>
+  <link rel="stylesheet" href="index.css" />
+</head>
+<body>
+  <div class="tabs">
+    <button id="tabProductos" class="active">Gestión de Productos</button>
+    <button id="tabVentas">Terminal de Ventas</button>
+  </div>
+
+  <!-- Sección Productos -->
+  <section id="contenedorProductos" class="tabContent">
+    <h2>Gestión de Productos</h2>
+    <form id="formProducto">
+      <input name="descripcion" placeholder="Descripción*" required />
+      <input name="barcode" placeholder="Código de barras (opcional)" />
+      <input name="precio_unidad" type="number" step="0.01" placeholder="Precio unidad" />
+      <input name="precio_x1000g" type="number" step="0.01" placeholder="Precio kilo (1000 g)" />
+      <button type="submit">Guardar</button>
+      <button type="button" id="btnCancelarEdicion" class="hidden">Cancelar</button>
+    </form>
+    <div id="prodContainer">
+      <table id="tblProductos">
+        <thead>
+          <tr>
+            <th>Descripción</th>
+            <th>BC</th>
+            <th>Precio U</th>
+            <th>Precio 1 kg</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Sección Ventas -->
+  <section id="contenedorVentas" class="tabContent hidden">
+    <h2>Terminal de Ventas</h2>
+
+    <div id="busquedaCodigo">
+      <input id="barcodeInput" placeholder="Escanee o escriba el código" autofocus />
+      <button id="btnBuscarCodigo">Buscar</button>
+    </div>
+
+    <div id="busquedaManual">
+      <input id="descripcionInput" list="listaDescripciones" placeholder="Buscar por descripción" />
+      <datalist id="listaDescripciones"></datalist>
+      <button id="buscarBtn">Buscar</button>
+    </div>
+
+    <div id="productoActual"></div>
+
+    <form id="formVenta">
+      <input id="cantidadInput" type="number" step="0.01" placeholder="Cantidad" required />
+      <button type="submit">Registrar línea</button>
+    </form>
+
+    <button id="btnConfirmarVenta">Finalizar venta</button>
+    <button id="btnVaciarTicket">Vaciar ticket</button>
+    <button id="btnExportar">Exportar ventas a Excel</button>
+
+    <table id="ticketActual">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Subtotal</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2">Total</td>
+          <td id="totalVenta">$0.00</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

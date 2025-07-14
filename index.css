@@ -1,0 +1,94 @@
+/* src/main_window/index.css */
+body {
+  font-family: sans-serif;
+  margin: 1rem;
+}
+
+h2 {
+  margin-bottom: 0.5rem;
+}
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+form input,
+form select,
+form button {
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+thead th {
+  background: #f0f0f0;
+  text-align: left;
+  padding: 0.5rem;
+}
+
+tbody td {
+  padding: 0.5rem;
+  border-top: 1px solid #ddd;
+}
+
+#prodContainer {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tabs button {
+  flex: 1;
+  padding: 0.5rem;
+  cursor: pointer;
+  background: #eee;
+  border: 1px solid #ccc;
+}
+
+.tabs button.active {
+  background: #fff;
+  border-bottom: 2px solid #007acc;
+}
+
+.tabContent.hidden {
+  display: none;
+}
+
+#busquedaCodigo,
+#busquedaManual {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+#productoActual {
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.mensaje {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: #007acc;
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  opacity: 0.9;
+  z-index: 1000;
+}
