@@ -1,0 +1,725 @@
+// src/renderer.js
+const { ipcRenderer } = require('electron');
+import './index.css';
+document.addEventListener('DOMContentLoaded', () => {
+  // 1) Referencias al DOM
+  const tabProductos       = document.getElementById('tabProductos');
+  const tabVentas          = document.getElementById('tabVentas');
+  const contProd           = document.getElementById('contenedorProductos');
+  const contVent           = document.getElementById('contenedorVentas');
+  const formProducto       = document.getElementById('formProducto');
+  const btnCancelarEdicion = document.getElementById('btnCancelarEdicion');
+  const tblProductos       = document.querySelector('#tblProductos tbody');
+  const prodContainer      = document.getElementById('prodContainer');
+  const barcodeInput       = document.getElementById('barcodeInput');
+  const btnBuscarCodigo    = document.getElementById('btnBuscarCodigo');
+  const descripcionInput   = document.getElementById('descripcionInput');
+  const listaDescs         = document.getElementById('listaDescripciones');
+  const buscarBtn          = document.getElementById('buscarBtn');
+  const productoActual     = document.getElementById('productoActual');
+  const formVenta          = document.getElementById('formVenta');
+  const cantidadInput      = document.getElementById('cantidadInput');
+  const btnConfirmarVenta  = document.getElementById('btnConfirmarVenta');
+  const btnVaciarTicket    = document.getElementById('btnVaciarTicket');
+  const btnExportar        = document.getElementById('btnExportar');
+  const ticketBody         = document.querySelector('#ticketActual tbody');
+  const totalVenta         = document.getElementById('totalVenta');
+  // 2) Estado global
+  let ticket = [];
+  let productoSeleccionado = null;
+
+  let productosCache = [];
+  let offsetRender   = 0;
+  const CHUNK = 20;
+  // 3) Utilitarios
+  async function buscarProductoPorCodigo(codigo) {
+    const all = await ipcRenderer.invoke('productos:listar');
+    return all.find(p => p.barcode && p.barcode.toString() === codigo.toString());
+  }
+  async function procesarBusquedaCodigo(code) {
+    const p = await buscarProductoPorCodigo(code);
+    if (!p) {
+      alert(`No se encontró producto con código "${code}"`);
+      barcodeInput.value = '';
+      return barcodeInput.focus();
+    }
+    productoSeleccionado = p;
+    productoActual.textContent = `→ ${p.descripcion}`;
+    return p;
+  }
+  async function buscarProductoPorDescripcion(desc) {
+    const all = await ipcRenderer.invoke('productos:listar');
+    return all.find(p => p.descripcion.toLowerCase() === desc.toLowerCase());
+  }
+
+  function mostrarMensaje(texto) {
+    const msg = document.createElement('div');
+    msg.className = 'mensaje';
+    msg.textContent = texto;
+    document.body.appendChild(msg);
+    setTimeout(() => msg.remove(), 3000);
+  }
+  function sortYCacheProductos(list) {
+    list.sort((a, b) => a.descripcion.localeCompare(b.descripcion, 'es', { sensitivity: 'base' }));
+    productosCache = list;
+    offsetRender   = 0;
+  }
+  function loadMoreProductos() {
+    const slice = productosCache.slice(offsetRender, offsetRender + CHUNK);
+    slice.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${p.descripcion}</td>
+        <td>${p.barcode || ''}</td>
+        <td>${p.precio_unidad || ''}</td>
+        <td>${p.precio_x1000g || ''}</td>
+        <td>
+          <button class="btnEditar" data-id="${p.id}">✎</button>
+          <button class="btnEliminar" data-id="${p.id}">🗑️</button>
+        </td>`;
+      tblProductos.appendChild(tr);
+    });
+    offsetRender += CHUNK;
+  }
+  async function renderProductos() {
+    tblProductos.innerHTML = '';
+    const list = await ipcRenderer.invoke('productos:listar');
+    sortYCacheProductos(list);
+    listaDescs.innerHTML = '';
+    productosCache.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.descripcion;
+      listaDescs.appendChild(opt);
+    });
+    loadMoreProductos();
+  }
+  prodContainer.addEventListener('scroll', () => {
+    if (prodContainer.scrollTop + prodContainer.clientHeight >= prodContainer.scrollHeight - 5) {
+      loadMoreProductos();
+    }
+  });
+  // 4) CRUD Productos
+  formProducto.addEventListener('submit', async e => {
+    e.preventDefault();
+    const datos = Object.fromEntries(new FormData(formProducto));
+    const desc = datos.descripcion.trim();
+    const bc   = (datos.barcode || '').trim();
+    const pu   = parseFloat(datos.precio_unidad) || 0;
+    const pw   = parseFloat(datos.precio_x1000g) || 0;
+    const editingId = +formProducto.dataset.editingId || null;
+    // Validaciones
+    if (!desc) {
+      alert('La descripción es obligatoria');
+      formProducto.querySelector('[name="descripcion"]').focus();
+      return;
+    }
+    if ((pu > 0 && pw > 0) || (pu === 0 && pw === 0)) {
+      alert('Define precio unidad O kilo, no ambos');
+      formProducto.querySelector('[name="precio_unidad"]').focus();
+      return;
+    }
+    const all = await ipcRenderer.invoke('productos:listar');
+    if (all.some(x => x.descripcion.toLowerCase() === desc.toLowerCase() && x.id !== editingId)) {
+      alert('Descripción duplicada');
+      formProducto.querySelector('[name="descripcion"]').focus();
+      return;
+    }
+    if (bc && all.some(x => x.barcode === bc && x.id !== editingId)) {
+      alert('Código de barras duplicado');
+      formProducto.querySelector('[name="barcode"]').focus();
+      return;
+    }
+    if (editingId) {
+      await ipcRenderer.invoke('productos:editar', {
+        id: editingId,
+        descripcion: desc,
+        barcode: bc || null,
+        precio_unidad: pu || null,
+        precio_x1000g: pw || null
+      });
+      mostrarMensaje('Producto actualizado');
+    } else {
+      await ipcRenderer.invoke('productos:agregar', {
+        descripcion: desc,
+        barcode: bc || null,
+        precio_unidad: pu || null,
+        precio_x1000g: pw || null
+      });
+      mostrarMensaje('Producto agregado');
+    }
+    formProducto.reset();
+    delete formProducto.dataset.editingId;
+    formProducto.querySelector('button[type="submit"]').textContent = 'Guardar';
+    btnCancelarEdicion.classList.add('hidden');
+    renderProductos();
+  });
+  tblProductos.addEventListener('click', async e => {
+    const target = e.target;
+    const id     = +target.dataset.id;
+    if (target.classList.contains('btnEliminar')) {
+      if (confirm('¿Eliminar este producto?')) {
+        await ipcRenderer.invoke('productos:eliminar', id);
+        mostrarMensaje('Producto eliminado');
+        renderProductos();
+      }
+      return;
+    }
+    if (target.classList.contains('btnEditar')) {
+      const p = await ipcRenderer.invoke('productos:obtener', id);
+      const descInput = formProducto.querySelector('[name="descripcion"]');
+      const bcInput   = formProducto.querySelector('[name="barcode"]');
+      const puInput   = formProducto.querySelector('[name="precio_unidad"]');
+      const pwInput   = formProducto.querySelector('[name="precio_x1000g"]');
+      const submitBtn = formProducto.querySelector('button[type="submit"]');
+      descInput.value = p.descripcion;
+      bcInput.value   = p.barcode || '';
+      puInput.value   = p.precio_unidad || '';
+      pwInput.value   = p.precio_x1000g || '';
+      formProducto.dataset.editingId = id;
+      submitBtn.textContent = 'Actualizar';
+      btnCancelarEdicion.classList.remove('hidden');
+      setTimeout(() => descInput.focus(), 0);
+    }
+  });
+  btnCancelarEdicion.addEventListener('click', () => {
+    formProducto.reset();
+    delete formProducto.dataset.editingId;
+    formProducto.querySelector('button[type="submit"]').textContent = 'Guardar';
+    btnCancelarEdicion.classList.add('hidden');
+    formProducto.querySelector('[name="descripcion"]').focus();
+  });
+  // 5) Terminal de Ventas
+  formVenta.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!productoSeleccionado) {
+      return alert('Primero selecciona un producto');
+    }
+    const cant = parseFloat(cantidadInput.value);
+    if (!(cant > 0)) {
+      alert('Cantidad inválida');
+      return cantidadInput.focus();
+    }
+    const p = productoSeleccionado;
+    ticket.push({
+      producto: p,
+      cantidad: cant,
+      subtotal: p.precio_unidad
+        ? p.precio_unidad * cant
+        : (p.precio_x1000g / 1000) * cant
+    });
+    cantidadInput.value = '';
+    productoSeleccionado = null;
+    productoActual.textContent = '';
+    actualizarTicket();
+    barcodeInput.focus();
+  });
+  btnConfirmarVenta.addEventListener('click', async () => {
+    if (ticket.length === 0) {
+      return alert('El ticket está vacío');
+    }
+    if (!confirm('¿Finalizar la venta?')) return;
+    let tipoPago;
+    try {
+      tipoPago = await ipcRenderer.invoke('ventas:seleccionar-medio-pago');
+    } catch {
+      return; // cancelado
+    }
+    const now = new Date().toISOString();
+    const res = await ipcRenderer.invoke('ventas:registrar', {
+      fecha: now,
+      tipo_pago: tipoPago,
+      items: ticket
+    });
+    alert(`Venta #${res.id} por $${res.total.toFixed(2)}`);
+    ticket = [];
+    productoSeleccionado = null;
+    productoActual.textContent = '';
+    actualizarTicket();
+    barcodeInput.focus();
+  });
+  btnVaciarTicket.addEventListener('click', () => {
+    if (!ticket.length) return;
+    if (confirm('¿Vaciar todo el ticket?')) {
+      ticket = [];
+      productoSeleccionado = null;
+      productoActual.textContent = '';
+      actualizarTicket();
+      barcodeInput.focus();
+    }
+  });
+  ticketBody.addEventListener('click', e => {
+    if (!e.target.classList.contains('btnBorrarLinea')) return;
+    const i = +e.target.dataset.index;
+    ticket.splice(i, 1);
+    actualizarTicket();
+  });
+  // 6) Pestañas y arranque
+  contProd.classList.remove('hidden');
+  contVent.classList.add('hidden');
+  tabProductos.classList.add('active');
+  tabVentas.classList.remove('active');
+  tabProductos.addEventListener('click', () => {
+    contProd.classList.remove('hidden');
+    contVent.classList.add('hidden');
+    tabProductos.classList.add('active');
+    tabVentas.classList.remove('active');
+  });
+  tabVentas.addEventListener('click', () => {
+    contVent.classList.remove('hidden');
+    contProd.classList.add('hidden');
+    tabVentas.classList.add('active');
+    tabProductos.classList.remove('active');
+  });
+ // Foco inicial
+  barcodeInput.focus();
+  // 7) actualizarTicket()
+  function actualizarTicket() {
+    ticketBody.innerHTML = '';
+    let total = 0;
+    ticket.forEach((l, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${l.producto.descripcion}</td>
+        <td>${l.cantidad}</td>
+        <td>${l.subtotal.toFixed(2)}</td>
+        <td><button class="btnBorrarLinea" data-index="${i}">🗑️</button></td>`;
+      ticketBody.appendChild(tr);
+      total += l.subtotal;
+    });
+    totalVenta.textContent = `$${total.toFixed(2)}`;
+  }
+  // Finalmente, el primer render de productos
+  renderProductos();
+});
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gestión y Ventas</title>
+  <link rel="stylesheet" href="index.css" />
+</head>
+<body>
+  <div class="tabs">
+    <button id="tabProductos" class="active">Gestión de Productos</button>
+    <button id="tabVentas">Terminal de Ventas</button>
+  </div>
+  <!-- Sección Productos -->
+  <section id="contenedorProductos" class="tabContent">
+    <h2>Gestión de Productos</h2>
+    <form id="formProducto">
+      <input name="descripcion" placeholder="Descripción*" required />
+      <input name="barcode" placeholder="Código de barras (opcional)" />
+      <input name="precio_unidad" type="number" step="0.01" placeholder="Precio unidad" />
+      <input name="precio_x1000g" type="number" step="0.01" placeholder="Precio kilo (1000 g)" />
+      <button type="submit">Guardar</button>
+      <button type="button" id="btnCancelarEdicion" class="hidden">Cancelar</button>
+    </form>
+    <div id="prodContainer">
+      <table id="tblProductos">
+        <thead>
+          <tr>
+            <th>Descripción</th>
+            <th>BC</th>
+            <th>Precio U</th>
+            <th>Precio 1 kg</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+  <!-- Sección Ventas -->
+  <section id="contenedorVentas" class="tabContent hidden">
+    <h2>Terminal de Ventas</h2>
+    <div id="busquedaCodigo">
+      <input id="barcodeInput" placeholder="Escanee o escriba el código" autofocus />
+      <button id="btnBuscarCodigo">Buscar</button>
+    </div>
+    <div id="busquedaManual">
+      <input id="descripcionInput" list="listaDescripciones" placeholder="Buscar por descripción" />
+      <datalist id="listaDescripciones"></datalist>
+      <button id="buscarBtn">Buscar</button>
+    </div>
+    <div id="productoActual"></div>
+    <form id="formVenta">
+      <input id="cantidadInput" type="number" step="0.01" placeholder="Cantidad" required />
+      <button type="submit">Registrar línea</button>
+    </form>
+
+    <button id="btnConfirmarVenta">Finalizar venta</button>
+    <button id="btnVaciarTicket">Vaciar ticket</button>
+    <button id="btnExportar">Exportar ventas a Excel</button>
+    <table id="ticketActual">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Subtotal</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2">Total</td>
+          <td id="totalVenta">$0.00</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+  <script src="renderer.js"></script>
+</body>
+</html>
+// src/utils/db.js
+const path     = require('path');
+const fs       = require('fs');
+const Database = require('better-sqlite3');
+ * Abre/crea la base en userData y aplica DDL.
+function initDb(app) {
+  const dataDir = app.getPath('userData');
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  const file = path.join(dataDir, 'gestion.db');
+  const db   = new Database(file);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS productos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      descripcion TEXT NOT NULL UNIQUE,
+      barcode TEXT UNIQUE,
+      precio_unidad REAL,
+      precio_x1000g REAL
+    );
+    CREATE TABLE IF NOT EXISTS ventas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fecha TEXT NOT NULL,
+      tipo_pago TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS itemsVenta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      venta_id INTEGER NOT NULL,
+      producto_id INTEGER NOT NULL,
+      cantidad REAL NOT NULL,
+      subtotal REAL NOT NULL,
+      FOREIGN KEY (venta_id) REFERENCES ventas(id),
+      FOREIGN KEY (producto_id) REFERENCES productos(id)
+    );
+  `);
+  return db;
+}
+/**
+ * Registra todos los handlers IPCMain
+ */
+function initDbHandlers(ipcMain, app) {
+  const db = initDb(app);
+  // 1) Listar todos
+  ipcMain.handle('productos:listar', () => {
+    return db
+      .prepare('SELECT * FROM productos ORDER BY descripcion COLLATE NOCASE')
+      .all();
+  });
+  // 2) Obtener uno solo
+  ipcMain.handle('productos:obtener', (evt, id) => {
+    return db
+      .prepare('SELECT * FROM productos WHERE id = ?')
+      .get(id);
+  });
+  // 3) Agregar
+  ipcMain.handle('productos:agregar', (evt, p) => {
+    const stmt = db.prepare(`
+      INSERT INTO productos (descripcion, barcode, precio_unidad, precio_x1000g)
+      VALUES (@descripcion, @barcode, @precio_unidad, @precio_x1000g)
+    `);
+    const info = stmt.run(p);
+    return { id: info.lastInsertRowid };
+  });
+  // 4) Editar
+  ipcMain.handle('productos:editar', (evt, p) => {
+    db.prepare(`
+      UPDATE productos
+      SET descripcion=@descripcion,
+          barcode=@barcode,
+          precio_unidad=@precio_unidad,
+          precio_x1000g=@precio_x1000g
+      WHERE id=@id
+    `).run(p);
+  });
+  // 5) Eliminar
+  ipcMain.handle('productos:eliminar', (evt, id) => {
+    db.prepare('DELETE FROM productos WHERE id = ?').run(id);
+  });
+  // 6) Registrar ventas (transacción)
+  ipcMain.handle('ventas:registrar', (evt, { fecha, tipo_pago, items }) => {
+    const insertVenta = db.prepare(`
+      INSERT INTO ventas (fecha, tipo_pago) VALUES (?, ?)
+    `);
+    const ventaInfo = insertVenta.run(fecha, tipo_pago);
+    const ventaId   = ventaInfo.lastInsertRowid;
+    const insertItem = db.prepare(`
+      INSERT INTO itemsVenta (venta_id, producto_id, cantidad, subtotal)
+      VALUES (?, ?, ?, ?)
+    `);
+    const calcularTotal = db.transaction(itms => {
+      let total = 0;
+      for (const it of itms) {
+        insertItem.run(ventaId, it.producto.id, it.cantidad, it.subtotal);
+        total += it.subtotal;
+      }
+      return total;
+    });
+    const total = calcularTotal(items);
+    return { id: ventaId, total };
+  });
+  // 7) (Opcional) Listar ventas con items
+  ipcMain.handle('ventas:listar', () => {
+    const ventas = db.prepare('SELECT * FROM ventas ORDER BY id').all();
+    const items  = db.prepare('SELECT * FROM itemsVenta').all();
+    return ventas.map(v => ({
+      ...v,
+      items: items.filter(i => i.venta_id === v.id)
+    }));
+  });
+}
+module.exports = { initDbHandlers };
+// src/utils/excel.js
+const ExcelJS = require('exceljs');
+const { db }  = require('./db');
+async function generarReporteVentas(dialog) {
+  // Obtiene datos
+  const ventas = db.prepare(`SELECT * FROM ventas ORDER BY id`).all();
+  const items  = db.prepare(`SELECT * FROM itemsVenta`).all();
+  // Crea workbook y hoja
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Ventas');
+  ws.columns = [
+    { header: 'Venta ID',   key: 'ventaId',   width: 10 },
+    { header: 'Fecha',      key: 'fecha',     width: 25 },
+    { header: 'Tipo Pago',  key: 'tipo_pago', width: 15 },
+    { header: 'Prod. ID',   key: 'prodId',    width: 10 },
+    { header: 'Cantidad',   key: 'cantidad',  width: 12 },
+    { header: 'Subtotal',   key: 'subtotal',  width: 12 }
+  ];
+  // Rellena filas
+  for (const v of ventas) {
+    const lista = items.filter(i => i.venta_id === v.id);
+    for (const it of lista) {
+      ws.addRow({
+        ventaId:  v.id,
+        fecha:    v.fecha,
+        tipo_pago:v.tipo_pago,
+        prodId:   it.producto_id,
+        cantidad: it.cantidad,
+        subtotal: it.subtotal
+      });
+    }
+  }
+  // Dialog "Guardar como..."
+  const { filePath } = await dialog.showSaveDialog({
+    title: 'Guardar reporte de ventas',
+    defaultPath: 'reporte_ventas.xlsx',
+    filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+  });
+  if (!filePath) throw new Error('Guardado cancelado');
+  // Escribe archivo
+  await wb.xlsx.writeFile(filePath);
+  return filePath;
+}
+function initExcelHandlers(ipcMain, dialog) {
+  ipcMain.handle('reporte:generar', () => generarReporteVentas(dialog));
+}
+module.exports = { initExcelHandlers };
+// src/main.js
+const path     = require('path');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { initDbHandlers }    = require('./utils/db');
+const { initExcelHandlers } = require('./utils/excel');
+function createMainWindow() {
+  const mainWindow = new BrowserWindow({
+    width: 1024,
+    height: 768,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY
+    }
+  });
+  mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
+}
+app.whenReady().then(() => {
+  // 1) Registra handlers de BD y Excel
+  initDbHandlers(ipcMain, app);
+  initExcelHandlers(ipcMain, dialog);
+  // 2) Nuevo handler: pide medio de pago antes de registrar la venta
+  ipcMain.handle('ventas:seleccionar-medio-pago', async () => {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Efectivo', 'Tarjeta', 'Transferencia', 'Cancelar'],
+      title: 'Medio de pago',
+      message: 'Selecciona el medio de pago para la venta'
+    });
+    if (response === 3) {
+      // botón “Cancelar”
+      throw new Error('cancel');
+    }
+    return ['efectivo', 'tarjeta', 'transferencia'][response];
+  });
+  // 3) Crea la ventana
+  createMainWindow();
+});
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+// webpack.main.config.js
+const rules = require('./webpack.rules');
+module.exports = {
+  target: 'electron-main',
+  entry: './src/main.js',
+  module: { rules },
+  resolve: { extensions: ['.js'] },
+  externals: {
+    'better-sqlite3': 'commonjs2 better-sqlite3',
+    electron: 'commonjs2 electron'
+  }
+};
+// forge.config.js
+const path = require('path');
+module.exports = {
+  packagerConfig: {},
+  rebuildConfig: {},
+  makers: [
+    { name: '@electron-forge/maker-squirrel', config: {} },
+    { name: '@electron-forge/maker-zip',      platforms: ['darwin'] },
+    { name: '@electron-forge/maker-deb',      config: {} },
+    { name: '@electron-forge/maker-rpm',      config: {} }
+  ],
+  plugins: [
+    {
+      name: '@electron-forge/plugin-webpack',
+      config: {
+        mainConfig: './webpack.main.config.js',
+        renderer: {
+          config: './webpack.renderer.config.js',
+          entryPoints: [
+            {
+              html:    './src/index.html',
+              js:      './src/renderer.js',
+              name:    'main_window',
+              preload: {
+                // si se llama `preload.js`
+                js: './src/preload.js'
+                // o si de verdad está `preloaded.js`, cámbialo aquí:
+                // js: './src/preloaded.js'
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+};
+// webpack.renderer.config.js
+const rules = require('./webpack.rules');
+module.exports = {
+  target: 'electron-renderer',
+  entry: './src/renderer.js',
+  module: { rules },
+  resolve: { extensions: ['.js', '.css'] },
+  externals: { electron: 'commonjs2 electron' }
+};
+// webpack.rules.js
+module.exports = [
+  {
+    test: /\.js$/,
+    exclude: /node_modules/,
+    use: {
+      loader: 'babel-loader',
+      options: { presets: ['@babel/preset-env'] }
+    }
+  },
+  {
+    test: /\.css$/i,
+    use: ['style-loader', 'css-loader']
+  }
+];
+/* src/main_window/index.css */
+body {
+  font-family: sans-serif;
+  margin: 1rem;
+}
+
+h2 {
+  margin-bottom: 0.5rem;
+}
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+form input,
+form select,
+form button {
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+thead th {
+  background: #f0f0f0;
+  text-align: left;
+  padding: 0.5rem;
+}
+tbody td {
+  padding: 0.5rem;
+  border-top: 1px solid #ddd;
+}
+#prodContainer {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+}
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.tabs button {
+  flex: 1;
+  padding: 0.5rem;
+  cursor: pointer;
+  background: #eee;
+  border: 1px solid #ccc;
+}
+
+.tabs button.active {
+  background: #fff;
+  border-bottom: 2px solid #007acc;
+}
+.tabContent.hidden {
+  display: none;
+}
+#busquedaCodigo,
+#busquedaManual {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+#productoActual {
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+.mensaje {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: #007acc;
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  opacity: 0.9;
+  z-index: 1000;
+}
